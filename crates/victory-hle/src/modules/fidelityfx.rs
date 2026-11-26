@@ -12,10 +12,11 @@
 //! title's command list and resources (their host list and host copies, in
 //! the states the title gives, see `victory_gpu::external`). The rest passes
 //! through unchanged: sizes, flags, jitter, motion-vector scale, camera
-//! values, the resource descriptions, the context. Only the upscaler: other
+//! values and the context. FP16 host textures get the matching SDK format.
+//! Only the upscaler: other
 //! effects the title asks for (frame generation) are refused. A diagnostics
 //! build generates frames itself from the upscale's depth and motion
-//! vectors with `VICTORY_FIDELITYFX_FRAMEGEN=1` (`victory_gpu::external::
+//! vectors with `VICTORY_FIDELITYFX_FRAMEGEN=1` or `4` (`victory_gpu::external::
 //! frame_generation_inputs`).
 #![allow(non_snake_case)]
 // Title code calls these through its import table.
@@ -28,6 +29,7 @@ use std::sync::OnceLock;
 
 use victory_gpu::object::Object;
 use windows::Win32::Graphics::Direct3D12::ID3D12Device;
+use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R16G16B16A16_FLOAT;
 use windows::core::Interface;
 
 use crate::{HleModule, hle_export};
@@ -40,6 +42,7 @@ const OK: u32 = 0;
 const UNKNOWN_TYPE: u32 = 2;
 const NO_PROVIDER: u32 = 4;
 const PARAMETER: u32 = 6;
+const FFX_RGBA16_FLOAT: u32 = 4;
 
 // Description types.
 const CREATE_UPSCALE: u64 = 0x1_0000;
@@ -173,9 +176,11 @@ pub fn use_host_dir(dir: Option<&Path>) {
             tracing::info!(folder = %dir.display(), versions, "FidelityFX: the host's upscaler serves the title's");
             let _ = HOST.set(host);
             #[cfg(feature = "diagnostics")]
-            if std::env::var_os("VICTORY_FIDELITYFX_FRAMEGEN").is_some_and(|v| v == "1") {
-                match victory_gpu::external::use_frame_generation(dir) {
-                    Ok(dll) => tracing::info!(dll, "FidelityFX: frame generation on the title's upscaled frames"),
+            if let Ok(mode) = std::env::var("VICTORY_FIDELITYFX_FRAMEGEN")
+                && matches!(mode.as_str(), "1" | "4")
+            {
+                match victory_gpu::external::use_frame_generation(dir, mode == "4") {
+                    Ok(dll) => tracing::info!(dll, mode, "FidelityFX: frame generation on the title's upscaled frames"),
                     Err(why) => tracing::warn!("FidelityFX frame generation: {why}; off"),
                 }
             }
@@ -188,7 +193,7 @@ pub fn use_host_dir(dir: Option<&Path>) {
 }
 
 /// Whether the host's FidelityFX serves the title's.
-pub(crate) fn serving() -> bool {
+pub fn serving() -> bool {
     HOST.get().is_some()
 }
 
@@ -460,6 +465,12 @@ extern "C" fn ffxDispatch(context: *mut *mut c_void, desc: *mut Header) -> u32 {
             return PARAMETER;
         };
         r.resource = texture.as_raw();
+        // SAFETY: this is the live host texture passed to the SDK below.
+        if unsafe { texture.GetDesc() }.Format == DXGI_FORMAT_R16G16B16A16_FLOAT {
+            // FFX_API_SURFACE_FORMAT_R16G16B16A16_FLOAT. Some title RGB9E5
+            // targets have an FP16 host allocation.
+            r.description[1] = FFX_RGBA16_FLOAT;
+        }
         textures.push(texture);
     }
     once!(info, formats = ?textures.iter().map(|t| {

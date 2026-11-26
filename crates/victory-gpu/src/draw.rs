@@ -1529,6 +1529,34 @@ impl State {
         out
     }
 
+    #[cfg(feature = "diagnostics")]
+    fn record_framegen_camera(&self, list: &HostList) {
+        if !crate::framegen::ml_enabled() {
+            return;
+        }
+        let Some(pipeline) = crate::pipeline::host_pipeline(self.pipeline as This) else {
+            return;
+        };
+        if !pipeline.stages.iter().any(|s| s.shader.hash == "4adcfeaa24ae6450")
+            || !pipeline.stages.iter().any(|s| s.shader.hash == "9ab96b7a002d6ac8")
+        {
+            return;
+        }
+        let Some(Root::Table(table)) = self.roots_ref(false).get(1) else {
+            return;
+        };
+        let Some(handle) = table.checked_add(8 * 4) else {
+            return;
+        };
+        let Some(View::Constant(address, size)) = crate::descriptor::view(handle) else {
+            return;
+        };
+        let Some(viewport) = self.fixed.viewports.first() else {
+            return;
+        };
+        crate::framegen::camera::record(list, address, size, [viewport.Width, viewport.Height]);
+    }
+
     pub(crate) fn draw(
         &mut self,
         list: &HostList,
@@ -1550,6 +1578,10 @@ impl State {
             };
             #[cfg(feature = "diagnostics")]
             list.note_op(|| self.op_text(format!("draw {count}x{instances}"), false, false));
+            #[cfg(feature = "diagnostics")]
+            if count == 3 && instances == 1 {
+                self.record_framegen_camera(list);
+            }
         #[cfg(feature = "diagnostics")]
         crate::capture::pass(list, self.targets.first().copied().unwrap_or(0), || self.op_text(format!("draw {count}x{instances}"), false, true));
             // SAFETY: an open list with everything set.
