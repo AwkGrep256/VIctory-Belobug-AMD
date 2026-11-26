@@ -43,7 +43,12 @@ impl LoadedImage {
 ///
 /// # Safety
 /// As there.
-unsafe fn write_code(base: usize, size: usize, rva: usize, bytes: &[u8]) -> Result<CodeWrite> {
+pub(crate) unsafe fn write_code(
+    base: usize,
+    size: usize,
+    rva: usize,
+    bytes: &[u8],
+) -> Result<CodeWrite> {
     if rva.checked_add(bytes.len()).is_none_or(|end| end > size) {
         return Ok(CodeWrite::Refused("outside the image"));
     }

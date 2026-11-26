@@ -24,8 +24,12 @@
 #[cfg(windows)]
 mod crash;
 #[cfg(all(windows, feature = "diagnostics"))]
+mod memory;
+#[cfg(all(windows, feature = "diagnostics"))]
 mod patch;
 pub mod prepare;
+#[cfg(all(windows, feature = "diagnostics"))]
+mod redirect;
 pub mod resolve;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod stacks;
@@ -45,8 +49,12 @@ pub use crash::{
 #[cfg(all(windows, feature = "diagnostics"))]
 pub use crash::save_on_crash;
 #[cfg(all(windows, feature = "diagnostics"))]
+pub use memory::{mapped_regions, read_memory};
+#[cfg(all(windows, feature = "diagnostics"))]
 pub use patch::CodeWrite;
 pub use prepare::{PrepareError, PreparedImage, prepare};
+#[cfg(all(windows, feature = "diagnostics"))]
+pub use redirect::Redirect;
 pub use resolve::{ImportResolver, Provenance, Resolution};
 #[cfg(all(windows, feature = "diagnostics"))]
 pub use stacks::{dump_stacks, dump_stacks_on_schedule};

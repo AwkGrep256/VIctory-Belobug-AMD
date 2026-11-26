@@ -115,7 +115,7 @@ pub fn run(
     victory_loader::log_crashes_to(temp.with_file_name("crashes.log"));
     victory_hle::runtime::use_console_timers();
     #[cfg(feature = "diagnostics")]
-    diagnostics(&image, &cfg)?;
+    diagnostics(&image, &cfg, console)?;
     let late = LateDlls {
         host: resolver.host.clone(),
         title_dir: title_dir.to_owned(),
@@ -160,9 +160,17 @@ fn check_startup_archive(path: &Path) -> Result<()> {
 /// The debugging aids (README): title code patches, scheduled stack dumps,
 /// watched values and memory saved on a crash. An error stops the launch.
 #[cfg(all(windows, feature = "diagnostics"))]
-fn diagnostics(image: &victory_loader::LoadedImage, cfg: &victory_core::Config) -> Result<()> {
+fn diagnostics(image: &victory_loader::LoadedImage, cfg: &victory_core::Config, console: Console) -> Result<()> {
     // First, before any thread started below can read or write the image.
-    crate::title_patch::apply(image)?;
+    if victory_hle::modules::fidelityfx::serving() {
+        crate::title_patch::apply(image, cfg, console)?;
+    } else if cfg.graphics_upscaler == victory_core::config::GraphicsUpscaler::AmdFsr
+        || std::env::var_os("VICTORY_UPSCALER").is_some()
+        || std::env::var_os("VICTORY_FFX_SCALE").is_some()
+    {
+        eprintln!("VIctory: Series X FidelityFX overrides need a working host upscaler DLL");
+    }
+    crate::menu_trace::start(image, cfg)?;
     victory_loader::dump_stacks_on_schedule();
     victory_hle::modules::audio::capture::start();
     watch(image.base(), image.info().size_of_image as usize);

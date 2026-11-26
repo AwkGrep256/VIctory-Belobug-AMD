@@ -25,6 +25,8 @@ pub struct Config {
     /// The user's copy of AMD FidelityFX for PC (the folder with its
     /// upscaler DLL), which replaces a title's console build.
     pub fidelityfx_dir: Option<PathBuf>,
+    /// Preferred upscaler for the native Graphics settings.
+    pub graphics_upscaler: GraphicsUpscaler,
     /// The config file that was read, if any.
     pub source: Option<PathBuf>,
 }
@@ -34,6 +36,23 @@ pub struct Config {
 struct FileConfig {
     #[serde(default)]
     paths: FilePaths,
+    #[serde(default)]
+    graphics: FileGraphics,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileGraphics {
+    #[serde(default)]
+    upscaler: GraphicsUpscaler,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphicsUpscaler {
+    #[default]
+    TitleDefault,
+    AmdFsr,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -50,7 +69,7 @@ struct FilePaths {
 impl Config {
     /// Loads configuration from the environment and the config file.
     pub fn load() -> Result<Self> {
-        let explicit = std::env::var_os("VICTORY_CONFIG").map(PathBuf::from);
+        let explicit = explicit_config_path(|k| std::env::var_os(k));
         let path = explicit
             .clone()
             .unwrap_or_else(|| PathBuf::from("victory.toml"));
@@ -74,7 +93,9 @@ impl Config {
             }
             None => (None, FileConfig::default()),
         };
-        Self::resolve(parsed.paths, source, |k| std::env::var_os(k))
+        let mut config = Self::resolve(parsed.paths, source, |k| std::env::var_os(k))?;
+        config.graphics_upscaler = parsed.graphics.upscaler;
+        Ok(config)
     }
 
     fn resolve(
@@ -101,6 +122,7 @@ impl Config {
             data_dir,
             test_titles,
             fidelityfx_dir: env_path("VICTORY_FIDELITYFX_DIR").or(file.fidelityfx_dir),
+            graphics_upscaler: GraphicsUpscaler::default(),
             source,
         })
     }
@@ -122,6 +144,14 @@ impl Config {
     pub fn data_subdir(&self, sub: &str) -> Result<PathBuf> {
         subdir(&self.data_dir, sub)
     }
+}
+
+/// The config file explicitly named by the environment, if any. An empty
+/// `VICTORY_CONFIG` means unset, like the other path variables.
+fn explicit_config_path(env: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<PathBuf> {
+    env("VICTORY_CONFIG")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
 }
 
 fn subdir(root: &Path, sub: &str) -> Result<PathBuf> {
@@ -194,10 +224,28 @@ mod tests {
     }
 
     #[test]
+    fn empty_config_env_is_ignored() {
+        let empty = |k: &str| (k == "VICTORY_CONFIG").then(OsString::new);
+        assert_eq!(explicit_config_path(empty), None);
+        let set = |k: &str| (k == "VICTORY_CONFIG").then(|| OsString::from("custom.toml"));
+        assert_eq!(
+            explicit_config_path(set),
+            Some(PathBuf::from("custom.toml"))
+        );
+    }
+
+    #[test]
     fn example_config_parses() {
         let text = include_str!("../../../victory.example.toml");
         let parsed: FileConfig = toml::from_str(text).unwrap();
         assert!(parsed.paths.game_dir.is_some());
+        assert_eq!(parsed.graphics.upscaler, GraphicsUpscaler::TitleDefault);
+    }
+
+    #[test]
+    fn graphics_upscaler_can_select_amd_fsr() {
+        let parsed: FileConfig = toml::from_str("[graphics]\nupscaler = 'amd_fsr'").unwrap();
+        assert_eq!(parsed.graphics.upscaler, GraphicsUpscaler::AmdFsr);
     }
 
     #[test]
